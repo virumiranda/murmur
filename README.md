@@ -1,6 +1,6 @@
 # Murmur
 
-Dictado por voz para Mac. Mantenés **fn**, hablás, soltás, y el texto aparece donde estás escribiendo: WhatsApp, mail, Notion, Claude Code, lo que sea. Gratis y de código abierto. Pensado para español; también funciona en inglés y en más de 90 idiomas.
+Dictado por voz para Mac (macOS con chip Apple; si usás Windows, mirá [Windows](#windows)). Mantenés **fn**, hablás, soltás, y el texto aparece donde estás escribiendo: WhatsApp, mail, Notion, Claude Code, lo que sea. Gratis y de código abierto. Pensado para español; también funciona en inglés y en más de 90 idiomas.
 
 ## Qué hace
 
@@ -21,13 +21,13 @@ Dictado por voz para Mac. Mantenés **fn**, hablás, soltás, y el texto aparece
 
 ## Instalación
 
-### La forma fácil: con Claude Code
+### La forma fácil: con Claude Code o Codex
 
-Si usás [Claude Code](https://claude.com/claude-code), pegale esto:
+Si usás [Claude Code](https://claude.com/claude-code) o [Codex](https://openai.com/codex), pegale esto:
 
-> Instalá Murmur desde https://github.com/virumiranda/murmur: clonalo en ~/Projects/murmur, leé su CLAUDE.md y seguí la "Instalación guiada" conmigo, paso a paso.
+> Instalá Murmur desde https://github.com/virumiranda/murmur: clonalo en ~/Projects/murmur, leé su AGENTS.md y seguí la "Instalación guiada" conmigo, paso a paso.
 
-Claude Code hace todo y te avisa cuando te toca a vos. Son cuatro momentos: poner la contraseña de tu Mac una vez, activar los permisos, cambiar el ajuste de la tecla fn y crear tu clave gratis de Groq.
+El agente hace todo y te avisa cuando te toca a vos. Son cuatro momentos: poner la contraseña de tu Mac una vez, activar los permisos, cambiar el ajuste de la tecla fn y crear tu clave gratis de Groq. Con Codex, además, aprobá los comandos que te pida correr fuera de su sandbox: instalar necesita internet y escribir fuera de la carpeta del proyecto.
 
 ### A mano
 
@@ -139,11 +139,11 @@ Todo está en `~/.config/murmur/config.json` (menú → **Abrir archivo de ajust
 
 Las claves van en `~/.config/murmur/.env`: `GROQ_API_KEY`, `OPENAI_API_KEY` y `ANTHROPIC_API_KEY`.
 
-## Personalizalo con Claude Code
+## Personalizalo con Claude Code o Codex
 
 Este proyecto está pensado para que lo modifiques a tu gusto.
 
-- Abrí la carpeta con **Claude Code**. El archivo `CLAUDE.md` le explica cómo está armado todo, así que podés pedirle cambios directamente: "agregá un sonido al terminar", "que la tecla sea option derecha".
+- Abrí la carpeta con **Claude Code** o **Codex**. El archivo `AGENTS.md` les explica cómo está armado todo, así que podés pedirles cambios directamente: "agregá un sonido al terminar", "que la tecla sea option derecha".
 - Las instrucciones de la limpieza están en `Sources/Murmur/CleanupPrompt.swift`. Para probar cambios sin compilar, guardá tu versión en `~/.config/murmur/cleanup-prompt.md`.
 - Medí si un cambio mejora o empeora: `bash scripts/eval-cleanup.sh` pasa los 27 casos de `evals/cleanup-cases.txt` por la limpieza. Agregá los tuyos.
 - Para probar sin hablar: `.build/release/Murmur --clean "eh, nos vemos el lunes, no, el martes"`, o `--transcribe audio.m4a`, o `--check`.
@@ -166,6 +166,16 @@ Este proyecto está pensado para que lo modifiques a tu gusto.
 - **Escribe mal un nombre:** agregalo a `vocabulary`.
 - **Después de recompilar no funciona la tecla:** si no creaste la firma local, macOS invalida los permisos en cada compilación. Ejecutá `tccutil reset Accessibility local.murmur` y `tccutil reset ListenEvent local.murmur`, y dalos de nuevo.
 - **Ver qué está pasando:** abrí la app Consola y filtrá por `local.murmur`.
+
+## Windows
+
+Murmur es solo para Mac: usa partes de macOS (el teclado, el micrófono, el Neural Engine) que no existen en Windows. Si usás Windows, estas alternativas hacen lo mismo:
+
+- **El dictado de Windows:** apretá **Win + H** en cualquier lugar donde se pueda escribir. Viene incluido, es gratis y entiende español.
+- **[Handy](https://github.com/cjpais/Handy):** gratis y de código abierto. Atajo de teclado, hablás, y pega el texto. Funciona sin internet.
+- **[Whispering](https://github.com/EpicenterHQ/epicenter):** de código abierto. Puede usar Groq (con tu propia clave, como Murmur) o modelos locales.
+
+¿Querés llevar Murmur a Windows con un agente de código? Se puede reutilizar casi todo lo que no es de macOS: las instrucciones de limpieza (`CleanupPrompt.swift`), los pedidos a Groq, la lógica de mantener / doble toque / Esc y las pruebas de `evals/`. Habría que rehacer la parte del sistema: escuchar el teclado (un hook de teclado de Windows), grabar el micrófono, pegar con Ctrl+V, el globito y el icono de la bandeja. Es un proyecto aparte, no un ajuste.
 
 ## Desinstalar
 
