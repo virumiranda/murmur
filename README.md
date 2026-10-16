@@ -21,6 +21,18 @@ Dictado por voz para Mac. Mantenés **fn**, hablás, soltás, y el texto aparece
 
 ## Instalación
 
+### La forma fácil: con Claude Code
+
+Si usás [Claude Code](https://claude.com/claude-code), pegale esto:
+
+> Instalá Murmur desde https://github.com/virumiranda/murmur: clonalo en ~/Projects/murmur, leé su CLAUDE.md y seguí la "Instalación guiada" conmigo, paso a paso.
+
+Claude Code hace todo y te avisa cuando te toca a vos. Son cuatro momentos: poner la contraseña de tu Mac una vez, activar los permisos, cambiar el ajuste de la tecla fn y crear tu clave gratis de Groq.
+
+### A mano
+
+Si preferís hacerlo vos, seguí estos pasos.
+
 ### 1. Descargar
 
 En GitHub, botón verde **Code → Download ZIP**, y descomprimilo (por ejemplo en `Documentos`). O con git: `git clone` + la dirección del repositorio.
