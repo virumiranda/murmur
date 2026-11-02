@@ -15,6 +15,8 @@ struct Config: Codable, Equatable {
     var vocabulary: [String] = []
     var playSounds = false
     var showPill = true
+    /// Keep the text of your dictations (never the audio) in history.json, to find and copy them in Murmur's window.
+    var saveHistory = true
     /// While a VPN is on, send Murmur's own API requests over Wi-Fi/Ethernet directly, because Groq blocks VPN
     /// addresses. The rest of the Mac stays in the VPN; the API provider sees your real IP for these requests.
     var bypassVPN = false
@@ -79,6 +81,7 @@ enum Paths {
     static let configFile = configDir.appendingPathComponent("config.json")
     static let envFile = configDir.appendingPathComponent(".env")
     static let modelsDir = configDir.appendingPathComponent("models", isDirectory: true)
+    static let historyFile = configDir.appendingPathComponent("history.json")
 
     static func modelURL(for nameOrPath: String) -> URL {
         let value = nameOrPath.trimmingCharacters(in: .whitespaces)

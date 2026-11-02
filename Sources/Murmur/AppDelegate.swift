@@ -11,6 +11,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var configWatcher: FileWatcher?
     private var statusItem: NSStatusItem!
 
+    private let history = HistoryStore()
+    private let personalization = PersonalizationStore()
+    private let notes = NotesStore()
+    private let meeting = MeetingRecorder()
+    private let transforms = TransformRunner()
+    private let learner = WordLearner()
+    private let status = AppStatus()
+    private var mainWindow: MainWindow!
+
     private var enabled: Bool {
         get { UserDefaults.standard.object(forKey: "enabled") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "enabled") }
@@ -26,8 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         DirectRoute.start()
         loadConfig()
-        controller = DictationController(config: config)
+        controller = DictationController(config: effectiveConfig())
         controller.onActivityChange = { [weak self] in self?.updateIcon() }
+        wireFeatures()
+        NSApp.mainMenu = MainWindow.makeMainMenu()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let menu = NSMenu()
@@ -39,12 +50,118 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // First load compiles Metal shaders; do it now rather than on the first dictation.
         Transcriber.warmUp(config: config)
         configWatcher = FileWatcher(url: Paths.configFile) { [weak self] in self?.reloadConfig() }
+
+        // Opened by hand (Finder, Dock, Spotlight): show the window. Started at login: stay in the menu bar.
+        if !launchedAtLogin { mainWindow.show() }
+    }
+
+    /// Double-clicking Murmur (or its Dock icon) while it's already running.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        mainWindow.show()
+        return false
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard meeting.isActive else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = L("A meeting is being recorded", "Se está grabando una reunión")
+        alert.informativeText = L("If you quit now, it's lost. Finish it first to keep the notes.",
+                                  "Si salís ahora, se pierde. Terminala primero para guardar las notas.")
+        alert.addButton(withTitle: L("Keep recording", "Seguir grabando"))
+        alert.addButton(withTitle: L("Quit anyway", "Salir igual"))
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         stopMonitor()
+        meeting.cancel()
         controller?.shutdown() // aborts a running whisper_full so the shutdown below doesn't wait on it
         LocalWhisper.shared.shutdown()
+        notes.flush()
+        PrivateFile.flush()
+    }
+
+    private var launchedAtLogin: Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else { return false }
+        return event.eventID == kAEOpenApplication
+            && event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+    }
+
+    // MARK: Features
+
+    private func wireFeatures() {
+        mainWindow = MainWindow(models: AppModels(history: history, personalization: personalization, notes: notes,
+                                                  meeting: meeting, transforms: transforms, status: status))
+        mainWindow.onFocus = { [weak self] in self?.refreshStatus() }
+
+        controller.postProcess = { [weak self] text in
+            guard let self else { return text }
+            let replaced = self.personalization.applyReplacements(text)
+            let front = AppContext.front()
+            return Style.apply(self.personalization.tone(for: front.kind), to: replaced,
+                               keep: self.controller.config.vocabulary)
+        }
+        controller.onTranscript = { [weak self] text, raw, seconds in
+            guard let self, self.config.saveHistory else { return }
+            let app = NSApp.isActive ? "Murmur" : NSWorkspace.shared.frontmostApplication?.localizedName
+            self.history.add(text: text, raw: raw, seconds: seconds, app: app)
+        }
+        controller.onRecordingStart = { [weak self] in self?.learner.finish() }
+        controller.onPasted = { [weak self] text in
+            guard let self, self.personalization.learnWords else { return }
+            self.learner.pasted(text)
+        }
+
+        learner.isKnown = { [weak self] word in
+            guard let self else { return true }
+            return self.personalization.knows(word) || self.config.vocabulary.contains { $0.caseInsensitiveCompare(word) == .orderedSame }
+        }
+        learner.onLearn = { [weak self] words in
+            guard let self, self.personalization.learnWords else { return }
+            let added = words.filter { self.personalization.addWord($0, learned: true) }
+            guard !added.isEmpty else { return }
+            Log.info("Learned \(added.count) word(s) from a correction")
+            self.controller.notify("✨ " + L("Added to dictionary: ", "Agregado al diccionario: ") + added.joined(separator: ", "))
+        }
+
+        personalization.onChange = { [weak self] in
+            guard let self else { return }
+            self.controller.config = self.effectiveConfig()
+            self.transforms.updateShortcuts(self.personalization)
+        }
+        transforms.config = config
+        transforms.onBusy = { [weak self] busy in self?.controller.externalWork = busy }
+        transforms.onMessage = { [weak self] text, isError in self?.controller.notify(text, isError: isError) }
+        transforms.updateShortcuts(personalization)
+
+        meeting.config = config
+        meeting.onSaved = { [weak self] note in self?.notes.add(note) }
+        meeting.onActivityChange = { [weak self] in self?.updateIcon() }
+        refreshStatus()
+    }
+
+    /// config.json plus what was taught in the window (the dictionary's words go to Whisper and the cleanup).
+    private func effectiveConfig() -> Config {
+        var c = config
+        c.vocabulary = personalization.vocabulary(base: config.vocabulary)
+        return c
+    }
+
+    private func refreshStatus() {
+        var missing: [Permissions.Pane] = []
+        if !Permissions.microphone { missing.append(.microphone) }
+        if !Permissions.inputMonitoring { missing.append(.inputMonitoring) }
+        if !Permissions.accessibility { missing.append(.accessibility) }
+        func set<T: Equatable>(_ path: ReferenceWritableKeyPath<AppStatus, T>, _ value: T) {
+            if status[keyPath: path] != value { status[keyPath: path] = value }
+        }
+        set(\.missing, missing)
+        set(\.enabled, enabled)
+        set(\.listening, monitor != nil)
+        set(\.hotkey, monitor?.spec.display ?? ((try? HotkeySpec.parse(config.hotkey))?.display ?? "fn"))
+        set(\.configVocabulary, config.vocabulary)
+        set(\.aiName, LLM.provider(config).map(\.name))
     }
 
     // MARK: Config
@@ -63,7 +180,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func reloadConfig(showErrors: Bool = false) {
         let oldHotkey = config.hotkey
         loadConfig()
-        controller.config = config
+        controller.config = effectiveConfig()
+        transforms.config = config
+        meeting.config = config
         if config.hotkey != oldHotkey, enabled {
             controller.cancelActiveRecording()
             startMonitor()
@@ -124,8 +243,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Menu bar
 
     private func updateIcon() {
+        refreshStatus()
         let symbol: String
-        if !enabled {
+        if meeting.isRecording {
+            symbol = "record.circle"
+        } else if !enabled {
             symbol = "mic.slash"
         } else if monitor == nil {
             symbol = "exclamationmark.triangle"
@@ -160,6 +282,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if enabled, let monitor {
             menu.addItem(info(L("Hold \(monitor.spec.display) to talk · double-tap for hands-free · Esc cancels",
                                 "Mantené \(monitor.spec.display) para hablar · doble toque: manos libres · Esc cancela")))
+        }
+
+        menu.addItem(.separator())
+        let open = item(L("Open Murmur", "Abrir Murmur"), #selector(openWindow))
+        menu.addItem(open)
+        switch meeting.phase {
+        case .idle:
+            menu.addItem(item(L("Record a Meeting", "Grabar una reunión"), #selector(toggleMeeting)))
+        case .recording:
+            menu.addItem(item(L("Finish Meeting (\(Format.duration(meeting.elapsed)))", "Terminar reunión (\(Format.duration(meeting.elapsed)))"),
+                              #selector(toggleMeeting)))
+        case .finishing:
+            menu.addItem(info(L("Writing the meeting notes…", "Armando las notas de la reunión…")))
         }
 
         menu.addItem(.separator())
@@ -240,6 +375,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleLogin() { LoginItem.toggle() }
+
+    @objc private func openWindow() { mainWindow.show() }
+
+    @objc private func toggleMeeting() {
+        if meeting.isRecording {
+            meeting.stop()
+        } else {
+            meeting.start()
+        }
+        mainWindow.show(.notetaker)
+    }
 
     @objc private func copyLast() {
         guard let text = controller.lastTranscript else { return }

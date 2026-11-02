@@ -38,7 +38,7 @@ enum TextInserter {
         pb.clearContents()
         pb.writeObjects([item])
         let ourChange = pb.changeCount
-        postKey(vKeyCode(), flags: .maskCommand)
+        postKey(keyCode(for: "v", fallback: kVK_ANSI_V), flags: .maskCommand)
 
         guard let saved else { return }
         // Give the target app time to read the pasteboard before putting the old contents back.
@@ -52,6 +52,11 @@ enum TextInserter {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
+    /// Cmd-C in the frontmost app (to grab the selection for a Transform).
+    static func copySelection() {
+        postKey(keyCode(for: "c", fallback: kVK_ANSI_C), flags: .maskCommand)
+    }
+
     private static func snapshot(_ pb: NSPasteboard) -> [NSPasteboardItem] {
         (pb.pasteboardItems ?? []).map { item in
             let copy = NSPasteboardItem()
@@ -62,15 +67,15 @@ enum TextInserter {
         }
     }
 
-    /// The key that produces "v" with Cmd held in the current layout (Dvorak, AZERTY, ...). QWERTY's is 9.
-    private static func vKeyCode() -> CGKeyCode {
+    /// The key that produces `char` with Cmd held in the current layout (Dvorak, AZERTY, ...). QWERTY's "v" is 9.
+    private static func keyCode(for char: Unicode.Scalar, fallback: Int) -> CGKeyCode {
         guard let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue(),
               let ptr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
-        else { return CGKeyCode(kVK_ANSI_V) }
+        else { return CGKeyCode(fallback) }
         let layoutData = Unmanaged<CFData>.fromOpaque(ptr).takeUnretainedValue() as Data
         return layoutData.withUnsafeBytes { raw -> CGKeyCode in
             guard let layout = raw.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else {
-                return CGKeyCode(kVK_ANSI_V)
+                return CGKeyCode(fallback)
             }
             let cmd = UInt32((cmdKey >> 8) & 0xFF)
             for code in 0..<128 {
@@ -80,11 +85,11 @@ enum TextInserter {
                 let status = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), cmd,
                                             UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit),
                                             &dead, chars.count, &length, &chars)
-                if status == noErr, length == 1, chars[0] == UniChar(("v" as Unicode.Scalar).value) {
+                if status == noErr, length == 1, chars[0] == UniChar(char.value) {
                     return CGKeyCode(code)
                 }
             }
-            return CGKeyCode(kVK_ANSI_V)
+            return CGKeyCode(fallback)
         }
     }
 

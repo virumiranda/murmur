@@ -160,81 +160,11 @@ enum Cleanup {
     private static func request(_ raw: String, provider: Provider, config: Config, context: String) async throws -> String {
         var user = "<dictation>\n\(raw)\n</dictation>"
         if !context.isEmpty { user = "<previous>\n\(context.suffix(600))\n</previous>\n" + user }
-        let system = systemPrompt(config)
-        var body: [String: Any]
-        guard let baseURL = URL(string: provider.baseURL), baseURL.scheme != nil else {
-            throw MurmurError("Invalid cleanup.baseURL \"\(provider.baseURL)\"")
-        }
-        var req = URLRequest(url: baseURL, timeoutInterval: config.cleanup.timeoutSeconds)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        switch provider.api {
-        case .openAICompatible:
-            req.url = req.url!.appendingPathComponent("chat/completions")
-            if let key = provider.key { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-            body = [
-                "model": provider.model,
-                "temperature": 0,
-                "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
-            ]
-            // gpt-oss models reason before answering; a cleanup pass needs very little of it.
-            if provider.model.contains("gpt-oss") { body["reasoning_effort"] = "low" }
-        case .anthropic:
-            req.url = req.url!.appendingPathComponent("messages")
-            req.setValue(provider.key, forHTTPHeaderField: "x-api-key")
-            req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-            // Current Claude models reject a non-default temperature, so none is sent.
-            // Thinking only adds latency to a cleanup pass.
-            body = [
-                "model": provider.model,
-                "max_tokens": 4096,
-                "thinking": ["type": "disabled"],
-                "system": system,
-                "messages": [["role": "user", "content": user]],
-            ]
-        }
-
-        var (data, response) = try await send(req, body)
-        if (response as? HTTPURLResponse)?.statusCode == 400 {
-            let error = String(decoding: data, as: UTF8.self)
-            if error.contains("reasoning_effort"), body["reasoning_effort"] != nil {
-                body["reasoning_effort"] = nil
-                (data, response) = try await send(req, body)
-            } else if error.contains("temperature"), body["temperature"] != nil {
-                // Some models only accept their default temperature.
-                body["temperature"] = nil
-                (data, response) = try await send(req, body)
-            } else if error.contains("thinking"), body["thinking"] != nil {
-                // Some Claude models (e.g. Opus 5.5) can't turn thinking off; keep it short instead.
-                body["thinking"] = nil
-                body["output_config"] = ["effort": "low"]
-                (data, response) = try await send(req, body)
-            }
-        }
-        if let http = response as? HTTPURLResponse, http.statusCode == 429 {
-            throw RateLimited(retryAfter: retryAfter(http))
-        }
-        try HTTP.check(response, data, service: provider.name)
-
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let text: String?
-        switch provider.api {
-        case .openAICompatible:
-            let choices = json?["choices"] as? [[String: Any]]
-            text = (choices?.first?["message"] as? [String: Any])?["content"] as? String
-        case .anthropic:
-            let blocks = json?["content"] as? [[String: Any]]
-            text = blocks?.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined()
-        }
-        guard let text else { throw MurmurError("Unexpected reply from \(provider.name)") }
+        let text = try await LLM.complete(system: systemPrompt(config), user: user, provider: provider,
+                                          timeout: config.cleanup.timeoutSeconds)
         return text
             .replacingOccurrences(of: "<dictation>", with: "")
             .replacingOccurrences(of: "</dictation>", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func send(_ req: URLRequest, _ body: [String: Any]) async throws -> (Data, URLResponse) {
-        try await HTTP.send(req, body: JSONSerialization.data(withJSONObject: body))
     }
 }

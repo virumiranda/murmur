@@ -1,6 +1,6 @@
 import AppKit
 
-let version = "1.0.0"
+let version = "1.1.0"
 let usage = """
 Murmur \(version): hold-to-talk dictation for macOS.
 
@@ -13,6 +13,8 @@ Usage:
         [--provider <name>]      Override transcription.provider (auto, local, groq, openai)
         [--realtime]             Feed the audio at real speed, as if recorded live (shows the wait after stopping)
   Murmur --clean "<text>"        Run text through the cleanup LLM only (to try prompt changes)
+  Murmur --transform <1-9> "<text>"  Rewrite text with the Transform on that shortcut (⌃⌥1 = Polish)
+  Murmur --summarize <file.txt>  Write meeting notes from a transcript in a text file
 """
 
 func argValue(_ flag: String) -> String? {
@@ -117,6 +119,52 @@ if args.contains("--help") || args.contains("-h") {
         FileHandle.standardError.write(Data(String(format: "%.2fs\n", Date().timeIntervalSince(start)).utf8))
         print(out)
         exit(0)
+    }
+    dispatchMain()
+} else if let key = argValue("--transform") {
+    let args = CommandLine.arguments
+    let text = args.firstIndex(of: "--transform").flatMap { $0 + 2 < args.count ? args[$0 + 2] : nil } ?? ""
+    Task { @MainActor in
+        let config = (try? ConfigStore.load()) ?? Config()
+        DirectRoute.start()
+        HTTP.bypassVPN = config.bypassVPN
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        guard let transform = PersonalizationStore().transform(forKey: Int(key) ?? 0), let provider = LLM.provider(config) else {
+            FileHandle.standardError.write(Data("No transform on that key, or no AI key\n".utf8))
+            exit(1)
+        }
+        do {
+            let start = Date()
+            let out = try await TransformRunner.rewrite(text, instructions: transform.instructions, provider: provider)
+            FileHandle.standardError.write(Data(String(format: "%@ · %.2fs\n", transform.name, Date().timeIntervalSince(start)).utf8))
+            print(out)
+            exit(0)
+        } catch {
+            FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
+    }
+    dispatchMain()
+} else if let file = argValue("--summarize") {
+    Task { @MainActor in
+        let config = (try? ConfigStore.load()) ?? Config()
+        DirectRoute.start()
+        HTTP.bypassVPN = config.bypassVPN
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        guard let text = try? String(contentsOfFile: file, encoding: .utf8), let provider = LLM.provider(config) else {
+            FileHandle.standardError.write(Data("Can't read the file, or no AI key\n".utf8))
+            exit(1)
+        }
+        do {
+            let start = Date()
+            let notes = try await Summarizer.summarize(text, provider: provider)
+            FileHandle.standardError.write(Data(String(format: "%.2fs\n", Date().timeIntervalSince(start)).utf8))
+            print("Title: \(notes.title ?? "–")\n\n\(notes.body)")
+            exit(0)
+        } catch {
+            FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
     }
     dispatchMain()
 } else if let file = argValue("--transcribe") {

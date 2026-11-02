@@ -44,6 +44,15 @@ final class AudioRecorder {
         _ = stop()
     }
 
+    /// Takes everything recorded so far and keeps recording (long sessions, so memory doesn't grow).
+    func drain() -> [Float] {
+        lock.withLock {
+            let out = samples
+            samples.removeAll(keepingCapacity: true)
+            return out
+        }
+    }
+
     /// Samples recorded so far in this session (any thread).
     var sampleCount: Int { lock.withLock { samples.count } }
 

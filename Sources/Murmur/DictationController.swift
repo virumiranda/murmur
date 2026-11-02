@@ -16,6 +16,18 @@ final class DictationController {
     }
     /// Called whenever recording/processing state changes (menu bar icon).
     var onActivityChange: (() -> Void)?
+    /// Final touches before pasting: dictionary replacements and the writing style for the app in front.
+    var postProcess: ((String) -> String)?
+    /// Called with each finished dictation (for the history), right before it's pasted.
+    var onTranscript: ((_ text: String, _ raw: String, _ seconds: Double) -> Void)?
+    /// Called after text was pasted into another app (to learn from corrections).
+    var onPasted: ((String) -> Void)?
+    /// A recording is starting.
+    var onRecordingStart: (() -> Void)?
+    /// Something else (a Transform) is working: show the working pill.
+    var externalWork = false {
+        didSet { refreshPill() }
+    }
     private(set) var lastTranscript: String?
 
     private enum State {
@@ -43,7 +55,6 @@ final class DictationController {
     private let pill = PillWindow()
     private var jobs: [UUID: Task<Void, Never>] = [:]
     private var tail: Task<Void, Never>?
-    private var workLabel = L("Transcribing…", "Transcribiendo…")
 
     var isRecording: Bool {
         if case .idle = state { return false }
@@ -56,6 +67,11 @@ final class DictationController {
         self.config = config
         pill.model.maxSeconds = TimeInterval(config.maxRecordingSeconds)
         recorder.onLevel = { [weak self] level in self?.pill.model.push(level: level) }
+        pill.onCancel = { [weak self] in self?.escape() }
+        pill.onStop = { [weak self] in
+            guard let self, case .handsFree = self.state else { return }
+            self.finishRecording()
+        }
     }
 
     // MARK: Hotkey state machine
@@ -133,6 +149,11 @@ final class DictationController {
         if isRecording { cancelRecording() }
     }
 
+    /// A short message in the pill (for other features).
+    func notify(_ text: String, isError: Bool = false) {
+        flash(text, isError: isError, seconds: isError ? 3 : 1.8)
+    }
+
     private func escape() {
         if isRecording {
             cancelRecording()
@@ -168,6 +189,7 @@ final class DictationController {
 
         self.mode = mode
         recordingStart = Date()
+        onRecordingStart?()
         recorder.start { [weak self] error in
             guard let self, self.isRecording else { return }
             self.cancelRecording()
@@ -260,7 +282,6 @@ final class DictationController {
             return
         }
         do {
-            setWorkLabel(L("Transcribing…", "Transcribiendo…"))
             // A safety net: whatever happens underneath, the pill never stays on "Transcribing…" for good.
             let started = Date()
             let result = try await withWatchdog(seconds: 120) { try await session.finish(samples) }
@@ -271,12 +292,23 @@ final class DictationController {
                 return
             }
 
-            var text = result.text
+            var text = postProcess?(result.text) ?? result.text
+            let final = text
 
-            lastTranscript = text
+            lastTranscript = final
+            onTranscript?(final, result.raw, Double(samples.count) / AudioRecorder.sampleRate)
             if config.insertion.trailingSpace, !text.hasSuffix("\n") { text += " " }
-            if Permissions.accessibility {
+            if NSApp.isActive {
+                // Murmur's own window is in front: type into its text box (a note), or else leave it on the clipboard.
+                if let view = NSApp.keyWindow?.firstResponder as? NSTextView, view.isEditable {
+                    view.insertText(text, replacementRange: view.selectedRange())
+                } else {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(final, forType: .string)
+                }
+            } else if Permissions.accessibility {
                 TextInserter.insert(text, config: config.insertion)
+                onPasted?(final)
             } else {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(text, forType: .string)
@@ -295,11 +327,6 @@ final class DictationController {
 
     // MARK: Pill
 
-    private func setWorkLabel(_ label: String) {
-        workLabel = label
-        refreshPill()
-    }
-
     private func showRecordingPill() {
         if config.showPill { pill.show(.recording(mode)) }
     }
@@ -309,8 +336,8 @@ final class DictationController {
         guard config.showPill else { return pill.hide() }
         if isRecording {
             pill.show(.recording(mode))
-        } else if isProcessing {
-            pill.show(.working(workLabel))
+        } else if isProcessing || externalWork {
+            pill.show(.working)
         } else if case .message = pill.model.phase {
             return // let the message time out
         } else {

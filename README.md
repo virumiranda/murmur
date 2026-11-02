@@ -12,6 +12,15 @@ Dictado por voz para Mac (macOS con chip Apple; si usás Windows, mirá [Windows
 - **Sin internet** también funciona, con un modelo local (un poco más lento).
 - Sin cuentas, sin suscripción, sin telemetría.
 
+Y tiene una ventana, como Wispr Flow (se abre con doble clic en la app o desde el menú → **Abrir Murmur**):
+
+- **Inicio:** todos tus dictados, por día, con buscador y botón para copiarlos de nuevo.
+- **Diccionario:** nombres y palabras que tiene que escribir exacto, y reemplazos ("mi mail" → tu dirección). Aprende solo: si después de dictar corregís cómo se escribe un nombre, lo agrega.
+- **Estilo:** cómo queda escrito según la app: formal, casual, muy casual (sin mayúsculas) o entusiasta, por separado para mensajes personales, de trabajo, mails y el resto.
+- **Transforms:** seleccionás un texto en cualquier app, apretás **⌃⌥1** y la IA lo pule ahí mismo. **⌃⌥2** lo convierte en un prompt para IA, **⌃⌥3** lo traduce al inglés, y podés crear los tuyos.
+- **Bloc de notas:** notas que escribís o dictás (mantené fn con la nota abierta).
+- **Tomador de notas:** graba una reunión (tu micrófono y, si querés, el audio de la compu, para escuchar a los demás en Zoom o Meet), la transcribe mientras habla la gente y al final arma un resumen con puntos clave y tareas.
+
 ## Lo que necesitás
 
 - Una Mac con Apple Silicon (M1 o posterior) y macOS 13.3 o más nuevo.
@@ -89,9 +98,23 @@ En el menú de Murmur, activá **Abrir al iniciar sesión**.
 | **Esc** | Cancela la grabación o la transcripción en curso. Esc también le llega a tu app. |
 | fn + otra tecla | Es un atajo (fn+←, fn+borrar), no un dictado: no se transcribe. |
 
-El globito de abajo muestra si está grabando (**Mantené** o **Manos libres**, con el tiempo), **Transcribiendo…**, o un aviso corto.
+El globito negro de abajo muestra las barritas de tu voz mientras grabás y unos puntitos mientras transcribe. En manos libres tiene dos botones: **✕** cancela y **■** termina y pega. Cuando faltan 30 segundos para el corte, avisa.
 
-El texto queda también en el portapapeles, por si lo querés pegar de nuevo. El menú tiene **Copiar último dictado**.
+El texto queda también en el portapapeles y en **Inicio**, en la ventana de Murmur, para copiarlo cuando quieras. Si dictás con una nota del **Bloc de notas** abierta, el texto va a la nota.
+
+### Transforms
+
+| Atajo | Hace |
+|---|---|
+| **⌃⌥1** | Pulir: más claro y conciso, sin cambiar lo que dice ni el tono. |
+| **⌃⌥2** | Prompt para IA: convierte ideas sueltas en un prompt ordenado. |
+| **⌃⌥3** | Traducir al inglés. |
+
+Seleccioná el texto y apretá el atajo (⌃ es Control, ⌥ es Opción). Cmd + Z lo deshace. En **Transforms** podés cambiar las instrucciones, los atajos (⌃⌥1 a ⌃⌥9) o crear los tuyos. Usa la misma IA que la limpieza, así que necesita la clave de Groq.
+
+### Tomador de notas
+
+En la ventana de Murmur, **Tomador de notas → Empezar a grabar** (o en el menú: **Grabar una reunión**). Con **Incluir el audio de la compu**, también graba lo que suena en la Mac, así se escucha a los demás aunque uses auriculares; la primera vez macOS pide permiso para grabar el audio del sistema (necesita macOS 14.2 o más nuevo). La transcripción aparece cada medio minuto. Al terminar, el resumen tarda unos segundos (en reuniones largas, unos minutos por el límite gratis de Groq). Sin clave de IA, guarda la transcripción sin resumen.
 
 En dictados largos, Murmur va transcribiendo mientras hablás (cada ~20 segundos, cortando en una pausa). Al soltar solo falta el último pedazo: hablar más no te hace esperar más.
 
@@ -136,6 +159,7 @@ Todo está en `~/.config/murmur/config.json` (menú → **Abrir archivo de ajust
 | `insertion.trailingSpace` | Agrega un espacio al final, para que los dictados seguidos no se peguen. |
 | `bypassVPN` | Ver [VPN](#vpn). |
 | `maxRecordingSeconds` | Corte automático (300 = 5 minutos). |
+| `saveHistory` | `false` deja de guardar los dictados en **Inicio**. |
 
 Las claves van en `~/.config/murmur/.env`: `GROQ_API_KEY`, `OPENAI_API_KEY` y `ANTHROPIC_API_KEY`.
 
@@ -146,12 +170,15 @@ Este proyecto está pensado para que lo modifiques a tu gusto.
 - Abrí la carpeta con **Claude Code** o **Codex**. El archivo `AGENTS.md` les explica cómo está armado todo, así que podés pedirles cambios directamente: "agregá un sonido al terminar", "que la tecla sea option derecha".
 - Las instrucciones de la limpieza están en `Sources/Murmur/CleanupPrompt.swift`. Para probar cambios sin compilar, guardá tu versión en `~/.config/murmur/cleanup-prompt.md`.
 - Medí si un cambio mejora o empeora: `bash scripts/eval-cleanup.sh` pasa los 27 casos de `evals/cleanup-cases.txt` por la limpieza. Agregá los tuyos.
-- Para probar sin hablar: `.build/release/Murmur --clean "eh, nos vemos el lunes, no, el martes"`, o `--transcribe audio.m4a`, o `--check`.
+- Para probar sin hablar: `.build/release/Murmur --clean "eh, nos vemos el lunes, no, el martes"`, o `--transcribe audio.m4a`, o `--check`. Para los Transforms, `--transform 1 "texto"`; para los resúmenes de reuniones, `--summarize transcripcion.txt`.
 
 ## Privacidad
 
 - Sin cuentas ni telemetría.
-- El audio queda en memoria. Si usás Groq, se sube comprimido y no se guarda en ningún lado: solo pasa unos milisegundos por un archivo temporal privado. Con el modelo local, nada sale de tu Mac.
+- El audio queda en memoria. Si usás Groq, se sube comprimido y no se guarda en ningún lado: solo pasa unos milisegundos por un archivo temporal privado. Con el modelo local, nada sale de tu Mac. Lo mismo con las reuniones: se guarda el texto, nunca el audio.
+- El texto de tus dictados, notas, reuniones y diccionario se guarda solo en tu Mac, en `~/.config/murmur` (`history.json`, `notes.json`, `personalization.json`), en archivos que solo vos podés leer. Para no guardar los dictados, poné `"saveHistory": false`; desde **Inicio** podés borrar el historial.
+- Para aprender palabras, Murmur lee el cuadro de texto donde pegó durante un minuto, en tu Mac. No guarda ni envía ese texto: solo agrega la palabra corregida. Se apaga en **Diccionario**.
+- Los Transforms mandan el texto seleccionado a la misma IA que la limpieza (Groq, si usás su clave).
 - Los registros nunca incluyen lo que dictaste.
 - Tus claves viven en `~/.config/murmur/.env`, fuera de esta carpeta: no se suben si compartís el proyecto.
 
@@ -166,6 +193,8 @@ Este proyecto está pensado para que lo modifiques a tu gusto.
 - **Escribe mal un nombre:** agregalo a `vocabulary`.
 - **Después de recompilar no funciona la tecla:** si no creaste la firma local, macOS invalida los permisos en cada compilación. Ejecutá `tccutil reset Accessibility local.murmur` y `tccutil reset ListenEvent local.murmur`, y dalos de nuevo.
 - **Ver qué está pasando:** abrí la app Consola y filtrá por `local.murmur`.
+- **Un Transform no hace nada:** fijate que haya texto seleccionado y que Murmur tenga el permiso de Accesibilidad. Si otra app usa el mismo atajo, cambialo en **Transforms**.
+- **El tomador de notas no escucha a los demás:** revisá en **Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla y audio del sistema** que Murmur tenga permiso para el audio del sistema.
 
 ## Windows
 

@@ -25,6 +25,7 @@ app:
 	cp .build/release/Murmur $(APP)/Contents/MacOS/Murmur
 	cp -R .build/release/whisper.framework $(APP)/Contents/Frameworks/
 	cp Resources/Info.plist $(APP)/Contents/Info.plist
+	cp Resources/Murmur.icns $(APP)/Contents/Resources/Murmur.icns
 	codesign --force --sign "$(SIGN_IDENTITY)" $(APP)/Contents/Frameworks/whisper.framework
 	codesign --force --sign "$(SIGN_IDENTITY)" --identifier local.murmur $(APP)
 	@echo "Built $(APP)"
